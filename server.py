@@ -12,49 +12,55 @@ CORS(app, resources={r"/*": {"origins": "*"}},
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-PROMPT_NF = """Voce e especialista em documentos fiscais brasileiros da empresa DI GASPI (redes de calcados).
+PROMPT_NF = """Voce e especialista em documentos fiscais brasileiros da empresa DI GASPI (rede de calcados).
 
-CONTEXTO IMPORTANTE:
-- A DI GASPI e o TOMADOR DO SERVICO (quem pagou/contratou). Ignore ela como fornecedor.
-- O FORNECEDOR e quem EMITIU a nota e RECEBEU o pagamento.
-- Nas notas ha anotacoes escritas a mao com os codigos: P: (pedido), F: (fornecedor), V: (vencimento)
+CONTEXTO:
+- A DI GASPI e sempre o TOMADOR (quem pagou). Nunca e o fornecedor.
+- O FORNECEDOR e quem emitiu a nota e recebeu o pagamento.
+- Nas notas ha anotacoes manuscritas com: P: (pedido), F: (fornecedor/numero), V: (vencimento)
 
-REGRAS CRITICAS:
+=== REGRA 1: CNPJ DO TOMADOR ===
+Faca uma varredura completa no documento procurando o CNPJ da DI GASPI (tomador).
+Locais para procurar (em ordem de prioridade):
+1. Secao "TOMADOR DO SERVICO" ou "DADOS DO TOMADOR" -> campo CNPJ/CPF/NIF
+2. Secao "DESTINATARIO" -> campo CNPJ
+3. Secao "INTERMEDIARIO DO SERVICO NAO IDENTIFICADO NA NFS-e" -> campo CNPJ
+4. Qualquer campo CNPJ associado ao nome "GASPI", "GASPARI", "DI GASPI" ou "COMERCIO DE CALCADOS"
+5. Anotacao manuscrita "F:" pode conter o codigo da loja (use para confirmar)
+Retorne SOMENTE os 14 digitos numericos, sem formatacao.
 
-1. FORNECEDOR (emitente):
-   - E quem EMITIU a nota. Campos: "EMITENTE DA NFS-e", "PRESTADOR DO SERVICO", "DADOS DO PRESTADOR", "Razao Social" do prestador
-   - NUNCA use: nome da Di Gaspi, Gaspari, nome de cidade, nome de estado, "TOMADOR", "DESTINATARIO"
-   - Use o nome curto sem LTDA/ME/EPP/EIRELI, maximo 28 caracteres
+=== REGRA 2: NUMERO DO DOCUMENTO ===
+Todo documento fiscal tem um numero. Faca varredura completa:
+- NFS-e: campo "Numero da NFS-e", "Numero da Nota", numero pequeno no canto (ex: 1032, 55, 338)
+- NF-e/DANFE: campo "NF Nr", numero no cabecalho superior (ex: 14800)
+- FATURA: "NOTA FISCAL FATURA Nr XXXXXX" -> use apenas os digitos significativos (ex: 793)
+- RECIBO: procure qualquer numero de identificacao, serie, protocolo ou recibo
+- DARF: numero do documento de arrecadacao
+- Anotacao manuscrita "P:" pode conter o numero do pedido como alternativa
+NUNCA use a chave de acesso (sequencia de 44 digitos).
+Se absolutamente nao houver numero, use o numero do pedido e marque eh_pedido:true.
 
-2. CNPJ DO TOMADOR:
-   - E o CNPJ de quem RECEBEU o servico: "TOMADOR DO SERVICO", "DESTINATARIO", "DADOS DO TOMADOR"
-   - Campos tipicos: "CNPJ/CPF / NIF" do tomador, "Inscricao Municipal" do tomador
-   - Retorne SOMENTE os digitos, sem pontos ou tracos (14 digitos)
-   - NUNCA use o CNPJ do emitente/prestador
+=== REGRA 3: FORNECEDOR (EMITENTE) ===
+Quem EMITIU a nota e recebeu o pagamento:
+- NFS-e: secao "EMITENTE DA NFS-e", "DADOS DO PRESTADOR", "PRESTADOR DO SERVICO"
+- NF-e: secao "EMITENTE", "REMETENTE", "DADOS DO EMITENTE"
+- NUNCA use: nome da Di Gaspi, Gaspari, nome de cidade, estado, "TOMADOR", "DESTINATARIO"
+- Nome curto sem LTDA/ME/EPP/EIRELI/SA, maximo 28 caracteres
 
-3. NUMERO DA NOTA:
-   - NFS-e: campo "Numero da NFS-e" ou "Numero da Nota" (numero pequeno, ex: 1032, 55, 338)
-   - NF-e: campo "NF Nr" ou numero no canto superior (ex: 14800, 14799)
-   - FATURA: numero da fatura no cabecalho (ex: "NOTA FISCAL FATURA Nr 000000793" -> use "793")
-   - RECIBO sem numero: use o numero do pedido e marque eh_pedido:true
-   - DARF: numero do documento
-   - NUNCA use a chave de acesso (numero de 44 digitos)
+=== REGRA 4: VENCIMENTO ===
+Procure em ordem:
+1. Anotacao manuscrita "V:" seguida de data (ex: "V: 15/06" -> "15-06")
+2. Campo impresso "Vencimento", "Data de Vencimento", "Pagar ate"
+3. Para DARF: campo "Pagar ate" ou "Vencimento"
+Formato de saida: DD-MM (apenas dia e mes)
 
-4. VENCIMENTO:
-   - Procure anotacoes manuscritas com "V:" seguido de data (ex: "V: 15/06" ou "V: 15-06")
-   - Se nao houver "V:", procure campo "Data de Vencimento", "Vencimento", "Pagar ate"
-   - Formato de saida: DD-MM (apenas dia e mes, ex: "15-06")
+=== REGRA 5: ROTACAO ===
+0=correto, 180=cabeca para baixo, 90=virado direita, 270=virado esquerda
 
-5. ROTACAO:
-   - 0 = documento ja esta na posicao correta para leitura
-   - 180 = documento esta de cabeca para baixo (texto invertido)
-   - 90 = documento esta virado 90 graus para direita
-   - 270 = documento esta virado 90 graus para esquerda
+Retorne APENAS este JSON sem markdown ou explicacoes:
+{"tipo":"NFSe","numero_documento":"123","eh_pedido":false,"fornecedor_curto":"NOME","cnpj_tomador":"00000000000000","valor":0.00,"vencimento":"DD-MM","rotacao":0}
 
-Retorne APENAS este JSON sem markdown:
-{"tipo":"NFSe","numero_documento":"123","eh_pedido":false,"fornecedor_curto":"NOME EMITENTE","cnpj_tomador":"00000000000000","valor":0.00,"vencimento":"DD-MM","rotacao":0}
-
-tipo pode ser: NFSe, NFe, fatura, recibo, DARF, outro"""
+tipo: NFSe, NFe, fatura, recibo, DARF, outro"""
 
 
 @app.after_request
