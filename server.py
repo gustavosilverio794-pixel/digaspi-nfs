@@ -1,8 +1,3 @@
-"""
-Di Gaspi - Servidor para processamento de NFs
-A chave da API é configurada como variável de ambiente no Render.
-"""
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import anthropic
@@ -10,9 +5,11 @@ import json
 import os
 
 app = Flask(__name__)
-CORS(app)
 
-# Chave lida da variável de ambiente (configurada no Render)
+CORS(app, resources={r"/*": {"origins": "*"}}, 
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "OPTIONS"])
+
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -36,13 +33,24 @@ PROMPT_NF = (
 )
 
 
-@app.route("/health", methods=["GET"])
+@app.after_request
+def after_request(response):
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    return response
+
+
+@app.route("/health", methods=["GET", "OPTIONS"])
 def health():
     return jsonify({"status": "ok", "message": "Servidor Di Gaspi rodando!"})
 
 
-@app.route("/read-nf", methods=["POST"])
+@app.route("/read-nf", methods=["POST", "OPTIONS"])
 def read_nf():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+
     try:
         data = request.get_json()
         pdf_b64 = data.get("pdf_base64")
